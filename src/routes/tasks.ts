@@ -15,12 +15,10 @@ interface Task {
 }
 
 // POST /api/tasks — Create a task
-// BUG 1: Doesn't validate that title is present
 router.post('/', (req: Request, res: Response) => {
   const db = getDb();
   const { title, description, status, priority } = req.body;
 
-  // BUG: No validation for required 'title' field
   const id = uuidv4();
   const taskStatus = status || 'todo';
   const taskPriority = priority || 3;
@@ -41,9 +39,6 @@ router.post('/', (req: Request, res: Response) => {
 });
 
 // GET /api/tasks — List tasks with filtering, sorting, pagination
-// BUG 2: Status filter is ignored
-// BUG 5: Sort param is interpolated directly (SQL injection)
-// BUG 6: Pagination offset calculation is wrong
 router.get('/', (req: Request, res: Response) => {
   const db = getDb();
   const { status, sort, order, page, limit } = req.query;
@@ -54,25 +49,19 @@ router.get('/', (req: Request, res: Response) => {
   let whereClause = '';
   const params: any[] = [];
 
-  // BUG 2: Status filter condition is built but never actually filters
   if (status) {
-    // This looks like it filters, but the WHERE clause uses a hardcoded true condition
-    whereClause = `WHERE 1=1`; // BUG: should be WHERE status = ?
-    // params.push(status);      // BUG: parameter never pushed
+    whereClause = `WHERE 1=1`;
   }
 
-  // BUG 5: Sort field is directly interpolated — SQL injection vulnerable
   const sortField = sort as string || 'created_at';
   const sortOrder = (order as string || 'asc').toUpperCase() === 'DESC' ? 'DESC' : 'ASC';
 
-  // BUG 6: offset uses pageNum instead of (pageNum - 1)
-  const offset = pageNum * limitNum; // BUG: should be (pageNum - 1) * limitNum
+  const offset = pageNum * limitNum;
 
   try {
     const countSql = `SELECT COUNT(*) as total FROM tasks ${whereClause}`;
     const { total } = db.prepare(countSql).get(...params) as { total: number };
 
-    // BUG 5: sortField is not sanitized — direct interpolation
     const sql = `SELECT * FROM tasks ${whereClause} ORDER BY ${sortField} ${sortOrder} LIMIT ? OFFSET ?`;
     const tasks = db.prepare(sql).all(...params, limitNum, offset) as Task[];
 
@@ -103,14 +92,12 @@ router.get('/:id', (req: Request, res: Response) => {
 });
 
 // PUT /api/tasks/:id — Update a task
-// BUG 3: Returns 200 even when task doesn't exist
 router.put('/:id', (req: Request, res: Response) => {
   const db = getDb();
   const { title, description, status, priority } = req.body;
 
   const existing = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as Task | undefined;
 
-  // BUG 3: Doesn't return 404 — proceeds with empty update and returns 200
   const updates: string[] = [];
   const params: any[] = [];
 
@@ -132,7 +119,6 @@ router.put('/:id', (req: Request, res: Response) => {
   }
 
   if (updates.length === 0) {
-    // If no fields to update, just return the existing (or empty)
     res.json({ data: existing || {} });
     return;
   }
@@ -145,7 +131,6 @@ router.put('/:id', (req: Request, res: Response) => {
     db.prepare(sql).run(...params);
 
     const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as Task | undefined;
-    // BUG 3: Returns 200 with empty data instead of 404
     res.json({ data: task || {} });
   } catch (err: any) {
     res.status(400).json({ error: err.message });
@@ -153,7 +138,6 @@ router.put('/:id', (req: Request, res: Response) => {
 });
 
 // DELETE /api/tasks/:id — Delete a task
-// BUG 4: Missing SQL execution — doesn't actually delete
 router.delete('/:id', (req: Request, res: Response) => {
   const db = getDb();
   const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as Task | undefined;
@@ -163,9 +147,7 @@ router.delete('/:id', (req: Request, res: Response) => {
     return;
   }
 
-  // BUG 4: Prepares the statement but never runs it
   db.prepare('DELETE FROM tasks WHERE id = ?');
-  // Missing: .run(req.params.id)
 
   res.status(204).send();
 });
